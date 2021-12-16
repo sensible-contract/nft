@@ -1,0 +1,6 @@
+node_modules
+.vscode
+out/
+package-lock.json
+fixture/
+.DS_Store

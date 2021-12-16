@@ -1,0 +1,69 @@
+import "util.scrypt";
+import "nftProto.scrypt";
+import "tokenProto.scrypt";
+import "rabinUtil.scrypt";
+
+contract TokenBuyForNft {
+  Ripemd160 senderAddress;
+  bytes nftID;
+  bytes nftCodeHash;
+
+  static int nftInputIndex = 2;
+
+  static int OP_SELL = 1;
+  static int OP_REFUND_TOKEN = 2;
+
+  public function unlock(
+    SigHashPreimage txPreimage,
+    bytes prevouts,
+    int[RabinUtil.ORACLE_VERIFY_NUM] rabinPubKeyIndexArray,
+    int[RabinUtil.ORACLE_VERIFY_NUM] rabinPubKeyVerifyArray,
+    bytes rabinPubKeyHashArray,
+    bytes nftScript,
+    bytes nftRabinMsg,
+    bytes[RabinUtil.ORACLE_VERIFY_NUM] nftRabinPaddingArray,
+    int[RabinUtil.ORACLE_VERIFY_NUM] nftRabinSigArray,
+    bytes tokenScript, // only refund need
+    PubKey senderPubKey, // only refund need
+    Sig senderSig, // only refund need
+    int tokenOutputSatoshis, // only refund need
+    int nftOutputSatoshis,
+    int op
+  ) {
+
+    SigHashType sigHashType = SigHash.SINGLE | SigHash.FORKID;
+    require(Util.checkPreimageSigHashType(txPreimage, sigHashType));
+
+    // check prevouts
+    require(hash256(prevouts) == Util.hashPrevouts(txPreimage));
+
+    bytes outputs = b'';
+    if (op == OP_SELL) {
+      // check token input
+      int nftScriptLen = len(nftScript);
+      // check rabinPubKeyVerifyArray
+      bytes rabinPubKeyHashArrayHash = TokenProto.getRabinPubKeyHashArrayHash(nftScript, nftScriptLen);
+      RabinUtil.verifyRabinPubKey(rabinPubKeyHashArrayHash,rabinPubKeyHashArray, rabinPubKeyVerifyArray, rabinPubKeyIndexArray);
+
+      RabinUtil.verifyOtherInput(rabinPubKeyVerifyArray, nftRabinMsg, nftRabinPaddingArray, nftRabinSigArray, prevouts, nftInputIndex, nftScript);
+
+      require(this.nftCodeHash == NftProto.getContractCodeHash(nftScript, nftScriptLen));
+      require(this.nftID == NftProto.getNftID(nftScript, nftScriptLen));
+
+      // token
+      bytes newNftScript = NftProto.getNewNftScript(nftScript, nftScriptLen, this.senderAddress);
+      outputs = Util.buildOutput(newNftScript, nftOutputSatoshis);
+    } else {
+      // check sig
+      require(hash160(senderPubKey) == this.senderAddress);
+      require(checkSig(senderSig, senderPubKey));
+
+      // do not check token id and codeHash
+
+      // check output token address
+      require(TokenProto.getTokenAddress(tokenScript, len(tokenScript)) == this.senderAddress);
+      outputs = Util.buildOutput(tokenScript, tokenOutputSatoshis);
+    }
+    require(hash256(outputs) == Util.hashOutputs(txPreimage));
+  } 
+}
